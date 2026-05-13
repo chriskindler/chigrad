@@ -1,0 +1,25 @@
+[build-system]
+build-backend = "mesonpy"
+requires = ["meson-python>=0.15.0", "meson>=1.2.0", "ninja"]
+ 
+[project]
+name = "chigrad"
+version = "0.1.0"
+description = "Correlated chi-squared fitting library for nucleon form factor extraction"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Christian Kindler" }]
+dependencies = [
+  "gvar",
+  "numpy",
+  "iminuit",
+  "scipy"
+]
+ 
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff"]
+ 
+[project.urls]
+Repository = "https://github.com/chriskindler/chigrad"
+ 

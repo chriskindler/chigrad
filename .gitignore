@@ -1,0 +1,28 @@
+# Build
+build/
+builddir/
+dist/
+*.egg-info/
+*.so
+*.pyd
+ 
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+ 
+# Venvs
+.venv/
+venv/
+ 
+# Editor
+.vscode/
+.idea/
+*.swp
+ 
+# OS
+.DS_Store
+ 
