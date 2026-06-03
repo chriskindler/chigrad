@@ -1,4 +1,4 @@
-# chigrad/results.py
+# chigrad/result.py
 from __future__ import annotations
 import iminuit
 import numpy as np
@@ -42,7 +42,7 @@ class FitResult:
         residuals:       np.ndarray
     ):
         self.t       = t
-        self.t_ext       = t_ext,
+        self.t_ext       = t_ext
         self.params_est       = params_est
         self.params_err_hess  = params_err_hess 
         self.chi2             = chi2
@@ -108,6 +108,16 @@ class FitResult:
         # AICc = AIC + 2 * (npar ** 2 + npar ) / (ndata - npar - 1)
         aic = self.chi2 + 2.0 * (self.npar - self.ndata)
         return aic + 2.0 * (self.npar ** 2 + self.npar) / (self.ndata - self.npar - 1)
+
+    @property
+    def judge_fit(self) -> bool:
+        # require finite parameters and finite Hesse errors;
+        # DON'T require self.valid (Migrad's strict EDM check rejects many usable fits)
+        if not all(np.isfinite(v) for v in self.params_est.values()):
+            return False
+        if not all(np.isfinite(v) for v in self.params_err_hess.values()):
+            return False
+        return True
 
 
     # TODO: Representation

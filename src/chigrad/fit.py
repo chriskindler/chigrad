@@ -141,7 +141,7 @@ def execute_fits(
     strategy:             int,
     ncall:                int,
    
-) -> tuple[FitResult, Optional[list[FitResult]]]:
+) -> FitRunResult:
 
     if not (execute_central_fit or execute_resample_fit):
         raise ValueError("Either central value or resample fit must be executed.")
@@ -160,26 +160,27 @@ def execute_fits(
         ncall            = ncall,
     )
 
+    central_result  = None
+    resample_result = None
+
     if execute_central_fit:
         y_cen = np.mean(y, axis=0)
         central_result = _fit(y=y_cen, **params_shared)
 
-    if not execute_resample_fit:
-        return FitRunResult(
-            central       = central_result,
-            resample      = None,
-            resample_type = resample_type
-        )
-
     if execute_resample_fit:
+        # use central converged params as starting values for resamples
+        if execute_central_fit and central_result.valid:
+            params_shared_res = {**params_shared, "params_start": dict(central_result.params_est)}
+        else:
+            params_shared_res = params_shared
         nres = y.shape[0]
-        resample_result = [_fit(y=y[j], **params_shared) for j in range(nres)]
+        resample_result = [_fit(y=y[j], **params_shared_res) for j in range(nres)]
 
     return FitRunResult(
         central       = central_result,
         resample      = resample_result,
-        resample_type = resample_type if execute_resample_fit else None
-    ) 
+        resample_type = resample_type if execute_resample_fit else None,
+    )
 
 """
 run.central.chi2        # central fit chi2
