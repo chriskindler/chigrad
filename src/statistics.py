@@ -7,6 +7,24 @@ from typing import Literal
 # COMPUTE (INVERSE) COVARIANCE MATRIX FROM RESAMPLE DATA
 # ================================================================================ 
 
+def inverse_covariance(
+    data: np.ndarray, # dim (nres, ntime)
+    resample_method: Literal["bootstrap", "jackknife"]
+) -> np.ndarray:
+
+    nres = data.shape[0]
+    if resample_method == "bootstrap":
+        cov = (1 / nres) * np.cov(data)
+    else:
+        cov = ((nres - 1) / nres) * np.cov(data)
+    return np.linalg.inv(cov)
+
+def inverse_standard_deviation(
+    data: np.ndarray,
+    resample_method: Literal["bootstrap", "jackknife"]
+) -> np.ndarray:
+    pass
+
 def compute_cov(y: np.ndarray, resample_method: Literal["bootstrap", "jackknife"]) -> np.ndarray:
     n_res = y.shape[0]
     if resample_method == "jackknife":

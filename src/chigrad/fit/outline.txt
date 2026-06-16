@@ -1,0 +1,11 @@
+fit.py
+├── build_covariance(samples, svd_cut, correlated)
+├── chi2(params, data, cov_inv, model_fn)
+├── FitResult  (dataclass)
+├── run_fit_iminuit(data, model_fn, p0, limits, ...)
+├── run_fit_scipy(data, model_fn, p0, bounds, ...)
+├── fit(data, model_fn, ...)  -> unified entry point
+├── scan_tmin(data, model_fn, tmin_range, ...)
+└── print_result(fit_result)
+
+
