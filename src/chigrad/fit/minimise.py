@@ -2,10 +2,11 @@
 import iminuit
 import numpy as np
 
+from dataclasses import replace
 from typing import Callable, Optional
-from chigrad.log import message
 
-from chigrad.statistics.jackknife import jackknife_variance, jackknife_covariance 
+from chigrad.log import message
+from chigrad.fit.result import FitConfig, FitResult, FitRunResult
 
 class ConvergenceError(Exception):
     pass
@@ -15,11 +16,10 @@ def _compute_correlated_chi2(
     y:          np.ndarray, # dim = (nres, ) 
     f:          Callable,
     cov_inv:    np.ndarray, # dim = (ndata, ndata)
-    p0:         dict[str, float],
+    param_start:         dict[str, float],
     priors:     Optional[dict[str, tuple[float, float]]] = None,
-
 ):
-    param_keys = list(p0.keys())
+    param_keys = list(param_start.keys())
 
     def cost(*vals):
         p = dict(zip(param_keys, vals))
@@ -40,10 +40,10 @@ def _compute_uncorrelated_chi2(
     y:          np.ndarray, # dim = (nres, )
     f:          Callable,
     var_inv:    np.ndarray, # dim = (ndata, )
-    p0:         dict[str, float],
+    param_start:         dict[str, float],
     priors:     Optional[dict[str, tuple[float, float]]] = None,
 ):
-    param_keys = list(p0.keys())
+    param_keys = list(param_start.keys())
 
     def cost(*vals):
         p = dict(zip(param_keys, vals))
@@ -64,8 +64,8 @@ def _prior_term(params, priors):
         priors: Optional[dict[str, tuple[float, float]]] = None
         priors = {
             "p": (mu, sigma),
-            "E1": (1.2, 0.3), # E1 ~ 1.2 ± 0.3   (Gaussian prior)
-            "A1": (0.3, 0.1), # A1 ~ 0.3 ± 0.1
+            "E1": (1.2, 0.3), # E1 = 1.2 ± 0.3  (Gaussian prior)
+            "A1": (0.3, 0.1), # A1 = 0.3 ± 0.1
         }
 
     """
@@ -73,82 +73,107 @@ def _prior_term(params, priors):
         return 0.0
     return sum(((params[k] - mu) / sig) ** 2 for k, (mu, sig) in priors.items())
 
-def minimise(
-    t:               np.ndarray, # dim = (ndata, )
-    y:               np.ndarray, # dim = (nres, )
-    f:               Callable,
-    cov_inv =        None, # if passed, dim = (ndata, ndata)
-    var_inv =        None, # if passed, dim = (ndata, )
-    *,
-    correlated:      bool,
-    p0:              dict[str, float],
-    p0_limits:       Optional[dict[str, tuple]] = None,
-    priors:          Optional[dict[str, tuple[float, float]]] = None,
-    tolerance:       float = 0.1,
-    strategy:        int = 1,
-    iterations:      int = 10000,
-    use_simplex:     bool = True, # Always True
-    raise_failure:   bool = True, # True for central value fits, False for resample fits
-):
+def minimise(config: FitConfig, t: np.ndarray, y: np.ndarray, f: Callable, cov_inv = None, var_inv = None):
     # TODO: Documentation
 
-    if correlated:
+    if config.correlated:
         if cov_inv is None:
             raise ValueError("Correlated fits require inverse covariance matrix.")
-        cost = _compute_correlated_chi2(t, y, f, cov_inv, p0, priors)
+        cost = _compute_correlated_chi2(t, y, f, cov_inv, config.param_start, config.priors)
     else:
         if var_inv is None:
             raise ValueError("Uncorrelated fits require inverse variance.")
-        cost = _compute_uncorrelated_chi2(t, y, f, var_inv, p0, priors)
+        cost = _compute_uncorrelated_chi2(t, y, f, var_inv, config.param_start, config.priors)
 
-    param_keys = list(p0.keys())
-    param_vals = list(p0.values())
+    param_keys = list(config.param_start.keys())
+    param_vals = list(config.param_start.values())
 
     # Construct Minuit object
     m = iminuit.Minuit(cost, *param_vals, name = tuple(param_keys))
-    if tolerance is not None:
-        m.tol = tolerance
-    m.strategy = strategy
-    if p0_limits:
-        message(f"Parameter limits imposed: {p0_limits}")
-        for name, lim in p0_limits.items():
+    if config.tolerance is not None:
+        m.tol = config.tolerance
+    m.strategy = config.strategy
+    if config.param_limit:
+        message(f"Parameter limits imposed: {config.param_limit}")
+        for name, lim in config.param_limit.items():
             m.limits[name] = lim
     
-    # minimisation: simplex -> p0_est -> migrad -> p0_final
-    if use_simplex:
-        message(f"SIMPLEX initialised: Perform Nelder-Mead optimisation.")
+    # minimisation: simplex -> param_start_est -> migrad -> param_start_final
+    if config.enable_simplex:
+        message(f"SIMPLEX algorithm initialised: Perform Nelder-Mead optimisation.")
         m.simplex()
 
-    message(f"MIGRAD initialised: Perform optimisation. Strategy {strategy}, tolerance {tolerance}, and maximum of {iterations} function calls.")
-    m.migrad(ncall=iterations)
-    message(f"Optimisation performed with {iterations} function calls.")
+    message(f"MIGRAD algorithm initialised: Perform optimisation. Strategy {config.strategy}, tolerance {config.tolerance}, and maximum of {config.iterations} function calls.")
+    m.migrad(ncall=config.iterations)
+    message(f"Optimisation performed with {config.iterations} function calls.")
 
-    if raise_failure and not m.valid:
+    if config.raise_failure and not m.valid:
         raise ConvergenceError("Optimisation terminated. Failed convergence.")
 
     if m.valid:
-        message(f"Valid optimisation: {m.valid}. Terminated successfully.")
+        message(f"Valid optimisation.")
         if m.accurate:
             message(f"Accurate covariance: {m.accurate}.")
         else:
             message(f"Accurate covariance: {m.accurate}.")
-            message("Optimisation terminated successfully, but with inaccurate covariance.")
+            message("Optimisation terminated, but with inaccurate covariance.")
 
         message("Computing Hessian matrix.")
         m.hesse()
-        message("Hessian matrix computed successfully.")
-        # values and errors → length-npar vectors
-        vals = np.asarray(m.values)             # shape (4,)  [A0, E0, A1, E1]
-        errs = np.asarray(m.errors)             # shape (4,)
-        print(vals.shape, errs.shape)
-        print(vals, errs)
 
-        # covariance → npar × npar matrix
-        cov = np.asarray(m.covariance)          # shape (4, 4)
-        print(cov.shape)
-        print(cov)
+    else:
+        msg = "Invalid optimisation."
+        fmin = m.fmin
+        if fmin.has_reached_call_limit:
+            msg += " Call limit was reached."
+        if fmin.is_above_max_edm:
+            msg += " Estimated distance to minimum too large."
 
-        # scalars
-        print(m.fval, m.valid, m.nfit, m.ndof)
+        message(msg)
 
     return m
+
+def _build_result(m, t, y, f) -> FitResult:
+    param_est = dict(zip(m.parameters, m.values))
+    param_hess = dict(zip(m.parameters, m.errors)) if m.valid else None
+    return FitResult(
+        t=t, y=y,
+        param_est=param_est,
+        param_hess=param_hess,
+        chi2=float(m.fval),
+        ndat=int(m.ndof + m.nfit),
+        npar=m.nfit,
+        nfcn=m.nfcn,
+        residuals=y - f(t, **param_est),
+    )
+
+def execute(config: FitConfig, t, y, f, cov_inv=None, var_inv=None) -> FitRunResult:
+    # ── central fit: cold start, simplex on, raise on failure ──
+    y_cen = np.mean(y, axis=0)
+    m = minimise(config, t, y_cen, f, cov_inv=cov_inv, var_inv=var_inv)
+    central = _build_result(m, t, y_cen, f)
+
+    resample = None
+    # ── resample fits: warm start, no simplex, no raise ──
+    if config.execute_resample:
+        message(f"Running {y.shape[0]} resample fits...", silent=config.silent_output)   # ← BEFORE loop
+
+        res_config = replace(
+            config,
+            param_start    = central.param_est,
+            enable_simplex = False,
+            raise_failure  = False,
+            silent_output  = True,
+        )
+        resample = []
+        for k in range(y.shape[0]):
+            m = minimise(res_config, t, y[k], f, cov_inv=cov_inv, var_inv=var_inv)
+            resample.append(_build_result(m, t, y[k], f))
+
+        message(f"Resample fits complete: {len(resample)} done.", silent=config.silent_output)  # ← AFTER loop
+
+    return FitRunResult(
+        central       = central,
+        resample      = resample,
+        resample_type = config.resample_type,
+    )

@@ -1,111 +1,98 @@
 import numpy as np
 import pytest
-
-from chigrad.fit.minimise import (
-    minimise,
-    _compute_correlated_chi2,
-    _compute_uncorrelated_chi2,
-    _prior_term,
-    ConvergenceError,
-)
+from chigrad.fit.result import FitConfig, FitResult, FitRunResult
+from chigrad.fit.minimise import execute, minimise, _build_result, ConvergenceError
 
 def model(t, A0, E0, A1, E1):
-    """Two-exponential two-point function."""
     return A0 * np.exp(-E0 * t) + A1 * np.exp(-E1 * t)
 
 P_TRUE = {"A0": 1.0, "E0": 0.5, "A1": 0.3, "E1": 1.2}
 
 @pytest.fixture
-def synthetic():
-    """Noisy correlator + frozen inverse covariance/variance."""
+def data():
+    """Synthetic jackknife ensemble + frozen weight matrices."""
     rng = np.random.default_rng(0)
     t = np.arange(0, 16)
     y_true = model(t, **P_TRUE)
-
-    nres = 200
-    sigma = 0.01 * y_true + 1e-4
-    samples = y_true[None, :] + rng.normal(0, sigma, size=(nres, len(t)))
-    y = samples.mean(axis=0)
-
+    samples = y_true[None, :] + rng.normal(0, 0.01*y_true + 1e-4, size=(100, len(t)))
     cov = np.cov(samples, rowvar=False, bias=True)
-    cov_inv = np.linalg.inv(cov)
-    var_inv = 1.0 / samples.var(axis=0, ddof=0)
+    return dict(t=t, samples=samples, cov_inv=np.linalg.inv(cov),
+                var_inv=1.0/samples.var(axis=0))
 
-    return dict(t=t, y=y, cov_inv=cov_inv, var_inv=var_inv)
+START = {"A0": 1.1, "E0": 0.4, "A1": 0.2, "E1": 1.0}
 
-# ---- prior term ----
-def test_prior_term_none_is_zero():
-    assert _prior_term({"A0": 1.0}, None) == 0.0
-    assert _prior_term({"A0": 1.0}, {}) == 0.0
+# config validation
+def test_config_rejects_bad_strategy():
+    with pytest.raises(ValueError, match="strategy"):
+        FitConfig(param_start=START, strategy=5)
 
-def test_prior_term_value():
-    assert _prior_term({"E1": 1.2}, {"E1": (1.0, 0.1)}) == pytest.approx(4.0)
+def test_config_rejects_empty_params():
+    with pytest.raises(ValueError, match="start parameters"):
+        FitConfig(param_start={})
 
-def test_prior_term_at_mean_is_zero():
-    assert _prior_term({"E1": 1.0}, {"E1": (1.0, 0.1)}) == pytest.approx(0.0)
-
-# ---- cost factory attributes ----
-def test_cost_has_errordef_and_ndata(synthetic):
-    s = synthetic
-    cost = _compute_correlated_chi2(s["t"], s["y"], model, s["cov_inv"], P_TRUE)
-    assert cost.errordef == 1.0
-    assert cost.ndata == len(s["t"])
-
-def test_cost_ndata_counts_priors(synthetic):
-    s = synthetic
-    priors = {"E1": (1.2, 0.3), "A1": (0.3, 0.1)}
-    cost = _compute_correlated_chi2(s["t"], s["y"], model, s["cov_inv"], P_TRUE, priors)
-    assert cost.ndata == len(s["t"]) + 2
-
-def test_cost_at_truth_is_small(synthetic):
-    s = synthetic
-    cost = _compute_correlated_chi2(s["t"], s["y"], model, s["cov_inv"], P_TRUE)
-    assert cost(*P_TRUE.values()) < 5 * len(s["t"])
-
-# ---- fits recover truth ----
-def test_correlated_recovers_truth(synthetic):
-    s = synthetic
-    p0 = {"A0": 1.1, "E0": 0.4, "A1": 0.2, "E1": 1.0}
-    m = minimise(s["t"], s["y"], model, cov_inv=s["cov_inv"],
-                 correlated=True, p0=p0, raise_failure=True)
+# single fit
+def test_minimise_correlated_recovers_truth(data):
+    cfg = FitConfig(param_start=START, correlated=True)
+    m = minimise(cfg, data["t"], data["samples"].mean(0), model, cov_inv=data["cov_inv"])
     assert m.valid
-    for key, truth in P_TRUE.items():
-        assert m.values[key] == pytest.approx(truth, abs=0.05), f"{key} off"
+    for k, truth in P_TRUE.items():
+        assert m.values[k] == pytest.approx(truth, abs=0.05)
 
-def test_uncorrelated_recovers_truth(synthetic):
-    s = synthetic
-    p0 = {"A0": 1.1, "E0": 0.4, "A1": 0.2, "E1": 1.0}
-    m = minimise(s["t"], s["y"], model, var_inv=s["var_inv"],
-                 correlated=False, p0=p0, raise_failure=True)
+def test_minimise_uncorrelated_recovers_E0(data):
+    cfg = FitConfig(param_start=START, correlated=False)
+    m = minimise(cfg, data["t"], data["samples"].mean(0), model, var_inv=data["var_inv"])
     assert m.valid
     assert m.values["E0"] == pytest.approx(P_TRUE["E0"], abs=0.05)
 
-# ---- input validation ----
-def test_correlated_without_cov_raises(synthetic):
-    s = synthetic
+def test_minimise_missing_cov_raises(data):
+    cfg = FitConfig(param_start=START, correlated=True)
     with pytest.raises(ValueError, match="inverse covariance"):
-        minimise(s["t"], s["y"], model, correlated=True, p0=P_TRUE)
+        minimise(cfg, data["t"], data["samples"].mean(0), model)
 
-def test_uncorrelated_without_var_raises(synthetic):
-    s = synthetic
-    with pytest.raises(ValueError, match="inverse variance"):
-        minimise(s["t"], s["y"], model, correlated=False, p0=P_TRUE)
+# full run
+def test_execute_central_only(data):
+    cfg = FitConfig(param_start=START, correlated=True, execute_resample=False)
+    run = execute(cfg, data["t"], data["samples"], model, cov_inv=data["cov_inv"])
+    assert run.central is not None
+    assert run.resample is None
+    assert run.param_err is None
+    assert run.param_final is None
+    assert run.param_est["E0"] == pytest.approx(P_TRUE["E0"], abs=0.05)
 
-# ---- failure handling ----
-def test_raise_failure_false_returns_object(synthetic):
-    s = synthetic
-    p0 = {"A0": 1e6, "E0": 50.0, "A1": -1e6, "E1": 80.0}
-    m = minimise(s["t"], s["y"], model, cov_inv=s["cov_inv"],
-                 correlated=True, p0=p0, iterations=1,
-                 use_simplex=False, raise_failure=False)
-    assert hasattr(m, "valid")
+def test_execute_with_resamples(data):
+    cfg = FitConfig(param_start=START, correlated=True, execute_resample=True)
+    run = execute(cfg, data["t"], data["samples"], model, cov_inv=data["cov_inv"])
+    assert run.nres == 100
+    assert run.nres_valid == 100
+    val, err = run.param_final["E0"]
+    assert val == pytest.approx(P_TRUE["E0"], abs=0.05)
+    assert err > 0
 
-# ---- limits ----
-def test_limits_applied(synthetic):
-    s = synthetic
-    p0 = {"A0": 1.1, "E0": 0.4, "A1": 0.2, "E1": 1.0}
-    limits = {"E0": (0, 1), "E1": (0, 5)}
-    m = minimise(s["t"], s["y"], model, cov_inv=s["cov_inv"],
-                 correlated=True, p0=p0, p0_limits=limits)
-    assert m.limits["E0"] == (0, 1)
-    assert m.values["E0"] >= 0
+def test_execute_param_err_keys_match(data):
+    cfg = FitConfig(param_start=START, correlated=True, execute_resample=True)
+    run = execute(cfg, data["t"], data["samples"], model, cov_inv=data["cov_inv"])
+    assert set(run.param_err.keys()) == set(P_TRUE.keys())
+
+def test_execute_goodness_of_fit(data):
+    cfg = FitConfig(param_start=START, correlated=True, execute_resample=True)
+    run = execute(cfg, data["t"], data["samples"], model, cov_inv=data["cov_inv"])
+    assert 0.0 <= run.pvalue <= 1.0
+    assert run.ndof == len(data["t"]) - 4
+    assert np.isfinite(run.aic) and np.isfinite(run.aicc)
+
+def test_per_resample_properties(data):
+    cfg = FitConfig(param_start=START, correlated=True, execute_resample=True)
+    run = execute(cfg, data["t"], data["samples"], model, cov_inv=data["cov_inv"])
+    for r in run.resample:
+        assert np.isfinite(r.pvalue)
+        assert r.ndof == len(data["t"]) - 4
+    assert run.resample_chi2dof.shape == (100,)
+
+
+def test_central_value_resample_error_split(data):
+    cfg = FitConfig(param_start=START, correlated=True, execute_resample=True)
+    run = execute(cfg, data["t"], data["samples"], model, cov_inv=data["cov_inv"])
+    # value == central fit's value (not resample mean)
+    assert run.param_est["E0"] == run.central.param_est["E0"]
+    # error == jackknife spread (not central's HESSE)
+    assert run.param_err["E0"] != run.param_hess["E0"]   # different sources
