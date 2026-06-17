@@ -134,7 +134,7 @@ def minimise(config: FitConfig, t: np.ndarray, y: np.ndarray, f: Callable, cov_i
     return m
 
 def _build_result(m, t, y, f) -> FitResult:
-    param_est = dict(zip(m.parameters, m.values))
+    param_est  = dict(zip(m.parameters, m.values))
     param_hess = dict(zip(m.parameters, m.errors)) if m.valid else None
     return FitResult(
         t=t, y=y,
@@ -148,15 +148,15 @@ def _build_result(m, t, y, f) -> FitResult:
     )
 
 def execute(config: FitConfig, t, y, f, cov_inv=None, var_inv=None) -> FitRunResult:
-    # ── central fit: cold start, simplex on, raise on failure ──
+    # Estimate params with simplex on, output serves es input for migrad
     y_cen = np.mean(y, axis=0)
     m = minimise(config, t, y_cen, f, cov_inv=cov_inv, var_inv=var_inv)
     central = _build_result(m, t, y_cen, f)
 
     resample = None
-    # ── resample fits: warm start, no simplex, no raise ──
+    # execute resample fits, if desired 
     if config.execute_resample:
-        message(f"Running {y.shape[0]} resample fits...", silent=config.silent_output)   # ← BEFORE loop
+        message(f"Running {y.shape[0]} resample fits...", silent=config.silent_output)
 
         res_config = replace(
             config,
@@ -170,7 +170,7 @@ def execute(config: FitConfig, t, y, f, cov_inv=None, var_inv=None) -> FitRunRes
             m = minimise(res_config, t, y[k], f, cov_inv=cov_inv, var_inv=var_inv)
             resample.append(_build_result(m, t, y[k], f))
 
-        message(f"Resample fits complete: {len(resample)} done.", silent=config.silent_output)  # ← AFTER loop
+        message(f"Resample fits complete: {len(resample)} done.", silent=config.silent_output)
 
     return FitRunResult(
         central       = central,
