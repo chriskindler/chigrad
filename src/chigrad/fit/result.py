@@ -136,10 +136,12 @@ class FitRunResult:
 
     @property
     def nres(self) -> Optional[int]:
+        # number of resample fits
         return len(self.resample) if self.resample else None
 
     @property
     def nres_valid(self) -> Optional[int]:
+        # number of valid resample fits
         if not self.resample:
             return None
         return sum(1 for r in self.resample if r.param_hess is not None)

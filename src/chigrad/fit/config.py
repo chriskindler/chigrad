@@ -4,15 +4,15 @@ from typing import Literal, Optional
 @dataclass
 class FitConfig:
     # parameters 
-    param_start: dict[str, float]
-    param_limit: Optional[dict[str, tuple]] = None
-    priors:      Optional[dict[str, tuple[float, float]]] = None
+    param_start:      dict[str, float]
+    param_limit:      Optional[dict[str, tuple]] = None
+    priors:           Optional[dict[str, tuple[float, float]]] = None
 
     # minimiser settings
-    tolerance:      float = 0.1
-    strategy:       int   = 1
-    iterations:     int   = 10000
-    enable_simplex: bool  = True
+    tolerance:        float = 0.1
+    strategy:         int   = 1
+    iterations:       int   = 10000
+    enable_simplex:   bool  = True
 
     # run control
     correlated:       bool = False

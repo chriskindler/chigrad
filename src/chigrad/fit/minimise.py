@@ -6,7 +6,8 @@ from dataclasses import replace
 from typing import Callable, Optional
 
 from chigrad.log import message
-from chigrad.fit.result import FitConfig, FitResult, FitRunResult
+from chigrad.fit.config import FitConfig
+from chigrad.fit.result import FitResult, FitRunResult
 
 class ConvergenceError(Exception):
     pass
