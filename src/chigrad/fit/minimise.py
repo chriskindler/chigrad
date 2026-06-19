@@ -3,7 +3,7 @@ import iminuit
 import numpy as np
 
 from dataclasses import replace
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 from chigrad.log import message
 from chigrad.fit.config import FitConfig
@@ -74,10 +74,10 @@ def _prior_term(params, priors):
         return 0.0
     return sum(((params[k] - mu) / sig) ** 2 for k, (mu, sig) in priors.items())
 
-def minimise(config: FitConfig, t: np.ndarray, y: np.ndarray, f: Callable, cov_inv = None, var_inv = None):
+def minimise(config: FitConfig,t: np.ndarray, y: np.ndarray, f: Callable, correlation_type: Literal["correlated", "uncorrelated"] ,cov_inv = None, var_inv = None):
     # TODO: Documentation
 
-    if config.correlated:
+    if correlation_type == "correlated": 
         if cov_inv is None:
             raise ValueError("Correlated fits require inverse covariance matrix.")
         cost = _compute_correlated_chi2(t, y, f, cov_inv, config.param_start, config.priors)
@@ -148,17 +148,16 @@ def _build_result(m, t, y, f) -> FitResult:
         residuals=y - f(t, **param_est),
     )
 
-def execute(config: FitConfig, t, y, f, cov_inv=None, var_inv=None) -> FitRunResult:
+def execute(config: FitConfig, t, y, f, correlation_type: Literal["correlated", "uncorrelated"], cov_inv=None, var_inv=None) -> FitRunResult:
     # Estimate params with simplex on, output serves es input for migrad
     y_cen = np.mean(y, axis=0)
-    m = minimise(config, t, y_cen, f, cov_inv=cov_inv, var_inv=var_inv)
+    m = minimise(config, t, y_cen, f, correlation_type, cov_inv=cov_inv, var_inv=var_inv)
     central = _build_result(m, t, y_cen, f)
 
     resample = None
     # execute resample fits, if desired 
     if config.execute_resample:
-        message(f"Running {y.shape[0]} resample fits...", silent=config.silent_output)
-
+        message(f"Running {y.shape[0]} resample fits.", silent=config.silent_output)
         res_config = replace(
             config,
             param_start    = central.param_est,
@@ -166,9 +165,10 @@ def execute(config: FitConfig, t, y, f, cov_inv=None, var_inv=None) -> FitRunRes
             raise_failure  = False,
             silent_output  = True,
         )
+
         resample = []
         for k in range(y.shape[0]):
-            m = minimise(res_config, t, y[k], f, cov_inv=cov_inv, var_inv=var_inv)
+            m = minimise(res_config, t, y[k], f, correlation_type, cov_inv=cov_inv, var_inv=var_inv)
             resample.append(_build_result(m, t, y[k], f))
 
         message(f"Resample fits complete: {len(resample)} done.", silent=config.silent_output)

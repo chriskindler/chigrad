@@ -15,7 +15,6 @@ class FitConfig:
     enable_simplex:   bool  = True
 
     # run control
-    correlated:       bool = False
     execute_resample: bool = False
     raise_failure:    bool = True
     resample_type:    Literal["bootstrap", "jackknife"] = "jackknife"
@@ -26,4 +25,3 @@ class FitConfig:
             raise ValueError(f"Minuit requires strategy 0, 1, or 2. Received {self.strategy}.")
         if not self.param_start:
             raise ValueError("No start parameters received.")
-
